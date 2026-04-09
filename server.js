@@ -6,37 +6,46 @@ app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 
 app.get('/', (req, res) => {
-  const key = process.env.ANTHROPIC_API_KEY
-  if (!key) return res.send('RJA Proxy running ✓ — WARNING: No API key set')
-  res.send(`RJA Proxy running ✓ — Key loaded (${key.substring(0,10)}...)`)
+  res.send('RJA Proxy running OK - Groq')
 })
 
 app.post('/proxy', async (req, res) => {
-  const key = process.env.ANTHROPIC_API_KEY
-
-  if (!key) {
-    return res.status(500).json({ error: { message: 'ANTHROPIC_API_KEY not set in environment' } })
-  }
-
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const messages = req.body.messages || []
+    const system = req.body.system || ''
+
+    const groqMessages = []
+    if (system) groqMessages.push({ role: 'system', content: system })
+    groqMessages.push(...messages)
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': key.trim(),
-        'anthropic-version': '2023-06-01'
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
       },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 2000,
+        messages: groqMessages
+      })
     })
+
     const data = await response.json()
-    res.json(data)
+
+    if (data.error) {
+      return res.status(500).json({ error: { message: data.error.message } })
+    }
+
+    // Convert Groq response to Anthropic format so frontend works unchanged
+    res.json({
+      content: [{ type: 'text', text: data.choices?.[0]?.message?.content || 'No response' }]
+    })
+
   } catch (err) {
     res.status(500).json({ error: { message: err.message } })
   }
 })
 
 const PORT = process.env.PORT || 3000
-app.listen(PORT, () => {
-  console.log(`Proxy ready on port ${PORT}`)
-  console.log(`API key set: ${process.env.ANTHROPIC_API_KEY ? 'YES' : 'NO'}`)
-})
+app.listen(PORT, () => console.log('Proxy running on port ' + PORT))
